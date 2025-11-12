@@ -1,18 +1,18 @@
 import { IsString, IsOptional } from 'class-validator';
 
 export class SendMessageDto {
-  @IsString()
+  @IsString({ message: 'chatId must be a string' })
   chatId: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'content must be a string' })
   content?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'image must be a string' })
   image?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'replyToId must be a string' })
   replyToId?: string;
 }

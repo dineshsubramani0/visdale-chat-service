@@ -43,6 +43,15 @@ export class User {
   @Column({ nullable: true })
   refresh_token: string;
 
+  @Column({ default: false })
+  is_online: boolean;
+
+  @Column({ nullable: true })
+  last_seen: Date;
+
+  @Column({ nullable: true })
+  avatar_url: string;
+
   @CreateDateColumn()
   created_at: Date;
 

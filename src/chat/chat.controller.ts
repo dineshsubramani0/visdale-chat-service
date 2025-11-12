@@ -15,6 +15,8 @@ import { User } from 'src/models/user.entity';
 import { CreateChatDto } from 'src/dto/create-chat.dto';
 import { SendMessageDto } from 'src/dto/send-message.dto';
 import { PaginateMessagesDto } from 'src/dto/paginate-messages.dto';
+import { plainToInstance } from 'class-transformer';
+import { ChatResponseDto } from 'src/dto/chat-response.dto';
 
 @Controller('rooms')
 @UseGuards(AuthGuard)
@@ -23,11 +25,11 @@ export class ChatController {
 
   /** Create a new chat room (group or 1-on-1) */
   @Post()
-  async createRoom(
-    @CurrentUser() currentUser: User,
-    @Body() createChatDto: CreateChatDto,
-  ) {
-    return this.chatService.createChat(currentUser, createChatDto);
+  async createChat(@CurrentUser() user: User, @Body() dto: CreateChatDto) {
+    const chat = await this.chatService.createChat(user, dto);
+    return plainToInstance(ChatResponseDto, chat, {
+      excludeExtraneousValues: true,
+    });
   }
 
   /** List all chats for current user */
@@ -74,5 +76,18 @@ export class ChatController {
     @Body() dto: SendMessageDto,
   ) {
     return this.chatService.sendMessage(currentUser, { ...dto, chatId });
+  }
+
+  @Get('user/list')
+  async listUsers() {
+    const users = await this.chatService.getAllUsers();
+    return users.map((u) => ({
+      id: u.id,
+      firstName: u.first_name,
+      lastName: u.last_name,
+      email: u.email,
+      avatarUrl: u.avatar_url || '/avatars/default.jpg',
+      isOnline: u.is_online,
+    }));
   }
 }

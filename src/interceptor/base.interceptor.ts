@@ -95,8 +95,8 @@ export class BaseInterceptor implements NestInterceptor {
       ...(response?.metadata && { metadata: response.metadata }),
       time_stamp: new Date(),
     };
-    // const encryptedSuccess = this.encryptionService.encrypt(fullSuccess);
+    const encryptedSuccess = this.encryptionService.encrypt(fullSuccess);
 
-    return fullSuccess;
+    return encryptedSuccess;
   }
 }

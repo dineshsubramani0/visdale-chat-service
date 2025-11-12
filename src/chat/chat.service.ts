@@ -17,6 +17,7 @@ import { SendMessageDto } from 'src/dto/send-message.dto';
 import { JwtService } from '@nestjs/jwt';
 import { UsersRepository } from 'src/models-repository/user.model.repository';
 import { JwtPayload } from 'jsonwebtoken';
+import { UserStatus } from 'src/@types/enums/status.enum';
 
 @Injectable()
 export class ChatService {
@@ -30,80 +31,100 @@ export class ChatService {
 
   /** Create a chat (group or 1-on-1) */
   async createChat(currentUser: User, dto: CreateChatDto): Promise<Chat> {
-    let chat: Chat;
-
-    // --- Group chat ---
+    // --- GROUP CHAT ---
     if (dto.isGroup && dto.participants?.length && dto.groupName) {
-      chat = await this.chatRepo.create({
+      const repo = this.chatRepo.getRepo();
+      const groupName = dto.groupName.trim();
+
+      // 1️⃣ Check for existing group name (case-insensitive)
+      const existingGroup = await repo
+        .createQueryBuilder('chat')
+        .where('LOWER(chat.groupName) = LOWER(:groupName)', { groupName })
+        .andWhere('chat.isGroup = true')
+        .getOne();
+
+      if (existingGroup) {
+        throw new BadRequestException(
+          `A group with the name ${groupName} already exists.`,
+        );
+      }
+
+      // 2️⃣ Create and save the group chat
+      const chat = repo.create({
         isGroup: true,
-        groupName: dto.groupName,
+        groupName,
         createdBy: currentUser,
       });
 
-      const participants: ChatParticipant[] = [];
+      await repo.save(chat);
 
-      // Add current user as admin
-      participants.push(
-        await this.participantRepo.create({
+      // 3️⃣ Ensure unique participants (exclude creator)
+      const uniqueParticipantIds = Array.from(
+        new Set(dto.participants.filter((id) => id !== currentUser.id)),
+      );
+
+      // 4️⃣ Create all participant entries (admin + others)
+      const participants: ChatParticipant[] = await Promise.all([
+        this.participantRepo.create({
           chat,
           user: currentUser,
           userId: currentUser.id,
           isAdmin: true,
         }),
-      );
-
-      // Add other participants
-      for (const userId of dto.participants) {
-        participants.push(
-          await this.participantRepo.create({
+        ...uniqueParticipantIds.map((userId) =>
+          this.participantRepo.create({
             chat,
             userId,
             isAdmin: false,
           }),
-        );
-      }
+        ),
+      ]);
+
+      // 5️⃣ Save participants
+      await this.participantRepo.getRepo().save(participants);
 
       chat.participants = participants;
-      return this.chatRepo.update(chat.id, chat);
+      return chat;
     }
 
-    // --- 1-on-1 chat ---
-    if (dto.participantId) {
-      // Check if chat already exists
-      const existingChats = await this.chatRepo['repository']
+    // --- 1-ON-1 CHAT ---
+    if (!dto.isGroup && dto.participantId) {
+      const repo = this.chatRepo.getRepo();
+
+      // 1️⃣ Check if 1-on-1 chat already exists
+      const existingChat = await repo
         .createQueryBuilder('chat')
-        .leftJoinAndSelect('chat.participants', 'participant')
+        .innerJoin('chat.participants', 'p1')
+        .innerJoin('chat.participants', 'p2')
         .where('chat.isGroup = false')
-        .getMany();
+        .andWhere('p1.userId = :user1', { user1: currentUser.id })
+        .andWhere('p2.userId = :user2', { user2: dto.participantId })
+        .getOne();
 
-      const found = existingChats.find((c) =>
-        c.participants.some(
-          (p) =>
-            (p.userId === currentUser.id && p.userId === dto.participantId) ||
-            (p.userId === dto.participantId && p.userId === currentUser.id),
-        ),
-      );
+      if (existingChat) return existingChat;
 
-      if (found) return found;
-
-      chat = await this.chatRepo.create({
+      // 2️⃣ Create a new 1-on-1 chat
+      const chat = repo.create({
         isGroup: false,
         createdBy: currentUser,
       });
+      await repo.save(chat);
 
-      chat.participants = [
-        await this.participantRepo.create({
+      const participants = await Promise.all([
+        this.participantRepo.create({
           chat,
           user: currentUser,
           userId: currentUser.id,
         }),
-        await this.participantRepo.create({
+        this.participantRepo.create({
           chat,
           userId: dto.participantId,
         }),
-      ];
+      ]);
 
-      return this.chatRepo.update(chat.id, chat);
+      await this.participantRepo.getRepo().save(participants);
+      chat.participants = participants;
+      return chat;
     }
 
     throw new BadRequestException('Invalid chat creation data');
@@ -225,5 +246,30 @@ export class ChatService {
       .getMany();
 
     return chats.map((c) => c.id);
+  }
+
+  /** Get all users with status 'CREATED' */
+  async getAllUsers(): Promise<
+    {
+      id: string;
+      first_name: string;
+      last_name: string;
+      email: string;
+      avatar_url?: string;
+      is_online?: boolean;
+    }[]
+  > {
+    const users = await this.userRepo.getRepo().find({
+      where: { status: UserStatus.CREATED },
+    });
+
+    return users.map((u) => ({
+      id: u.id,
+      first_name: u.first_name,
+      last_name: u.last_name,
+      email: u.email,
+      avatar_url: u.avatar_url || '/avatars/default.jpg',
+      is_online: u.is_online,
+    }));
   }
 }
