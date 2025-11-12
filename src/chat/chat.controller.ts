@@ -15,6 +15,7 @@ import { User } from 'src/models/user.entity';
 import { CreateChatDto } from 'src/dto/create-chat.dto';
 import { SendMessageDto } from 'src/dto/send-message.dto';
 import { PaginateMessagesDto } from 'src/dto/paginate-messages.dto';
+import { AddParticipantsDto } from 'src/dto/add-participants.dto';
 import { plainToInstance } from 'class-transformer';
 import { ChatResponseDto } from 'src/dto/chat-response.dto';
 
@@ -28,6 +29,20 @@ export class ChatController {
   async createChat(@CurrentUser() user: User, @Body() dto: CreateChatDto) {
     const chat = await this.chatService.createChat(user, dto);
     return plainToInstance(ChatResponseDto, chat, {
+      excludeExtraneousValues: true,
+    });
+  }
+
+  /** Add participants to an existing room */
+  @Post(':id/add-participants')
+  async addParticipants(
+    @CurrentUser() user: User,
+    @Param('id') roomId: string,
+    @Body() dto: AddParticipantsDto,
+  ) {
+    // Optional: you can check if currentUser is admin of the group here
+    const updatedRoom = await this.chatService.addParticipants(roomId, dto);
+    return plainToInstance(ChatResponseDto, updatedRoom, {
       excludeExtraneousValues: true,
     });
   }
@@ -51,7 +66,6 @@ export class ChatController {
     @Param('id') chatId: string,
     @Query() query?: PaginateMessagesDto,
   ) {
-    // Convert query params to numbers safely
     const limit = query?.limit ? Number(query.limit) : undefined;
     const offset = query?.offset ? Number(query.offset) : undefined;
 
@@ -78,13 +92,14 @@ export class ChatController {
     return this.chatService.sendMessage(currentUser, { ...dto, chatId });
   }
 
+  /** List all available users */
   @Get('user/list')
   async listUsers() {
     const users = await this.chatService.getAllUsers();
     return users.map((u) => ({
       id: u.id,
-      firstName: u.first_name,
-      lastName: u.last_name,
+      first_name: u.first_name,
+      last_name: u.last_name,
       email: u.email,
       avatarUrl: u.avatar_url || '/avatars/default.jpg',
       isOnline: u.is_online,

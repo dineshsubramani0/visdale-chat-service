@@ -18,6 +18,8 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersRepository } from 'src/models-repository/user.model.repository';
 import { JwtPayload } from 'jsonwebtoken';
 import { UserStatus } from 'src/@types/enums/status.enum';
+import { AddParticipantsDto } from 'src/dto/add-participants.dto';
+import { In } from 'typeorm';
 
 @Injectable()
 export class ChatService {
@@ -49,7 +51,7 @@ export class ChatService {
         );
       }
 
-      // 2️⃣ Create and save the group chat
+      // Create and save the group chat
       const chat = repo.create({
         isGroup: true,
         groupName,
@@ -58,12 +60,12 @@ export class ChatService {
 
       await repo.save(chat);
 
-      // 3️⃣ Ensure unique participants (exclude creator)
+      //  Ensure unique participants (exclude creator)
       const uniqueParticipantIds = Array.from(
         new Set(dto.participants.filter((id) => id !== currentUser.id)),
       );
 
-      // 4️⃣ Create all participant entries (admin + others)
+      //  Create all participant entries (admin + others)
       const participants: ChatParticipant[] = await Promise.all([
         this.participantRepo.create({
           chat,
@@ -80,7 +82,7 @@ export class ChatService {
         ),
       ]);
 
-      // 5️⃣ Save participants
+      //  Save participants
       await this.participantRepo.getRepo().save(participants);
 
       chat.participants = participants;
@@ -91,7 +93,7 @@ export class ChatService {
     if (!dto.isGroup && dto.participantId) {
       const repo = this.chatRepo.getRepo();
 
-      // 1️⃣ Check if 1-on-1 chat already exists
+      // Check if 1-on-1 chat already exists
       const existingChat = await repo
         .createQueryBuilder('chat')
         .innerJoin('chat.participants', 'p1')
@@ -103,7 +105,7 @@ export class ChatService {
 
       if (existingChat) return existingChat;
 
-      // 2️⃣ Create a new 1-on-1 chat
+      // Create a new 1-on-1 chat
       const chat = repo.create({
         isGroup: false,
         createdBy: currentUser,
@@ -271,5 +273,44 @@ export class ChatService {
       avatar_url: u.avatar_url || '/avatars/default.jpg',
       is_online: u.is_online,
     }));
+  }
+
+  async addParticipants(roomId: string, dto: AddParticipantsDto) {
+    // Fetch the room
+    const room = await this.chatRepo.getRepo().findOne({
+      where: { id: roomId },
+      relations: ['participants', 'participants.user'],
+    });
+    if (!room) throw new NotFoundException('Room not found');
+
+    // Fetch users safely
+    const users = await this.userRepo.getRepo().find({
+      where: { id: In(dto.userIds) },
+    });
+    if (!users.length) throw new NotFoundException('No valid users found');
+
+    // Filter out already existing participants
+    const existingParticipantIds = new Set(
+      room.participants.map((p) => p.user.id),
+    );
+
+    const newParticipants = users
+      .filter((u) => !existingParticipantIds.has(u.id))
+      .map((u) => {
+        const participant = new ChatParticipant();
+        participant.user = u;
+        participant.chat = room;
+        participant.userId = u.id;
+        return participant;
+      });
+
+    // Save new participants
+    await this.participantRepo.getRepo().save(newParticipants);
+
+    // Return updated room with participants
+    return this.chatRepo.getRepo().findOne({
+      where: { id: roomId },
+      relations: ['participants', 'participants.user'],
+    });
   }
 }
