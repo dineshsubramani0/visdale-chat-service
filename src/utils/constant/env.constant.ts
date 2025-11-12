@@ -1,0 +1,22 @@
+export const ENV_CONFIG_KEYS = {
+  // App
+  NODE_ENV: 'NODE_ENV',
+  APP_PORT: 'APP_PORT',
+  APPLICATION: 'APPLICATION',
+
+  // Database
+  DB_HOST: 'DB_HOST',
+  DB_PORT: 'DB_PORT',
+  DB_USERNAME: 'DB_USERNAME',
+  DB_PASSWORD: 'DB_PASSWORD',
+  DB_DATABASE: 'DB_DATABASE',
+  DB_SCHEMA: 'DB_SCHEMA',
+  DB_SYNC: 'DB_SYNC',
+  DB_LOG: 'DB_LOG',
+
+  // Encryption
+  ENCRYPTION_SECRET_KEY: 'ENCRYPTION_SECRET_KEY',
+
+  // CORS / Frontend
+  FRONTEND_URL: 'FRONTEND_URL', // e.g., "http://localhost:5173"
+};
