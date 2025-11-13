@@ -42,8 +42,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
 
     // Encrypt the entire error object
-    // const encryptedError = this.encryptionService.encrypt(fullError);
+    const encryptedError = this.encryptionService.encrypt(fullError);
 
-    response.status(status).json(fullError);
+    response.status(status).json(encryptedError);
   }
 }
