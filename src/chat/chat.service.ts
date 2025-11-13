@@ -18,6 +18,13 @@ import { UserStatus } from 'src/@types/enums/status.enum';
 import { AddParticipantsDto } from 'src/dto/add-participants.dto';
 import { In } from 'typeorm';
 
+export interface PaginatedMessagesResponse {
+  currentPage: number;
+  lastPage: boolean;
+  totalPages: number;
+  messages: Message[];
+}
+
 @Injectable()
 export class ChatService {
   constructor(
@@ -166,13 +173,15 @@ export class ChatService {
   }
 
   /** Get messages for a room with pagination */
+
+  // src/chat/chat.service.ts
   async getRoomMessages(
     chatId: string,
     userId: string,
-    limit = 20,
+    limit = 10,
     offset = 0,
-  ): Promise<Message[]> {
-    // Verify user is participant
+  ): Promise<PaginatedMessagesResponse> {
+    // Verify user is a participant (single or group chat)
     const isParticipant = await this.participantRepo['repository']
       .createQueryBuilder('p')
       .where('p.chatId = :chatId', { chatId })
@@ -181,16 +190,45 @@ export class ChatService {
 
     if (!isParticipant) throw new BadRequestException('Unauthorized');
 
-    // Fetch messages with pagination
-    return this.messageRepo['repository']
+    // Fetch messages AND total count in a single query
+    const [messagesDesc, totalMessages] = await this.messageRepo['repository']
       .createQueryBuilder('message')
       .leftJoinAndSelect('message.sender', 'sender')
+      .leftJoinAndSelect('message.replyTo', 'replyTo')
       .where('message.chatId = :chatId', { chatId })
-      .orderBy('message.createdAt', 'DESC')
+      .orderBy('message.createdAt', 'DESC') // Fetch newest first, allowing 'offset' to skip newest
       .skip(offset)
       .take(limit)
-      .getMany()
-      .then((msgs) => msgs.toReversed()); // oldest first
+      .getManyAndCount(); // Retrieve both the data and the total count
+
+    const totalPages = Math.ceil(totalMessages / limit);
+
+    let currentPage: number;
+    if (totalMessages === 0) {
+      currentPage = 0;
+    } else {
+      // 1. Calculate the standard page number (Page 1 is newest batch)
+      const standardPage = Math.floor(offset / limit) + 1;
+
+      // 2. Map standard page to historical page (Page 1 = oldest batch)
+      currentPage = totalPages - standardPage + 1;
+
+      // Ensure currentPage is at least 1
+      currentPage = Math.max(1, currentPage);
+    }
+
+    // 'lastPage' flag signals that the client has reached the oldest message history (Page 1)
+    const lastPage = currentPage === 1;
+
+    // Reverse the order from DESC (Newest -> Oldest) to ASC (Oldest -> Newest) for the frontend
+    const messages = messagesDesc.toReversed();
+
+    return {
+      currentPage,
+      lastPage, // This correctly means 'Reached the beginning of history'
+      totalPages,
+      messages, // This batch is ordered Oldest -> Newest
+    };
   }
 
   /** Send a message in a chat */

@@ -5,15 +5,16 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  WebSocketServer,
 } from '@nestjs/websockets';
-import { Socket } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from 'src/dto/send-message.dto';
 import { UsersRepository } from 'src/models-repository/user.model.repository';
 import { User } from 'src/models/user.entity';
 import * as jwt from 'jsonwebtoken';
 
-// Extend Socket with optional user data and auth token
+/** Extend Socket with optional user data and auth token */
 interface SocketAuth {
   token?: string;
 }
@@ -28,10 +29,28 @@ interface AuthenticatedSocket extends Socket {
   cors: { origin: process.env.FRONTEND_URL || '*', credentials: true },
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  @WebSocketServer()
+  server!: Server;
+
   constructor(
     private readonly chatService: ChatService,
     private readonly userRepo: UsersRepository,
   ) {}
+
+  /** Helper: Find all sockets connected for a specific user ID */
+  private async getSocketsByUserId(
+    userId: string,
+  ): Promise<AuthenticatedSocket[]> {
+    const sockets: AuthenticatedSocket[] = [];
+    const allSockets = await this.server.fetchSockets();
+
+    for (const socket of allSockets) {
+      const s = socket as unknown as AuthenticatedSocket;
+      if (s.data?.user?.id === userId) sockets.push(s);
+    }
+
+    return sockets;
+  }
 
   /** Handle new client connection */
   async handleConnection(client: AuthenticatedSocket) {
@@ -51,15 +70,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Verify JWT
       const payload = jwt.verify(token, process.env.JWT_SECRET_KEY);
-
-      // Extract user ID from 'sub' field
       const userId = (payload as { sub?: string }).sub;
+
       if (!userId) {
         console.warn(`[WS] Invalid token payload, disconnecting ${client.id}`);
         return client.disconnect();
       }
 
-      // Fetch user from database
+      // Fetch user from DB
       const user = await this.userRepo
         .getRepo()
         .findOne({ where: { id: userId } });
@@ -71,16 +89,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.data.user = user;
       console.log(`[WS] User verified: ${user.id} (${user.first_name})`);
 
-      // Join all chat rooms for this user
+      // Join all rooms the user is part of
       const roomIds = await this.chatService.getUserRoomIds(user.id);
-      console.log(`[WS] User ${user.id} joining rooms: ${roomIds.join(', ')}`);
       for (const roomId of roomIds) {
         await client.join(roomId);
       }
 
       console.log(`[WS] Socket ${client.id} connected successfully`);
-    } catch (error) {
-      console.error(`[WS] Connection error for socket ${client.id}:`, error);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(err as string);
+      console.error(
+        `[WS] Connection error for socket ${client.id}:`,
+        error.message,
+      );
       client.disconnect();
     }
   }
@@ -93,7 +114,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
   }
 
-  /** Send message to a chat room */
+  /** Send a message to a chat room */
   @SubscribeMessage('sendMessage')
   async handleMessage(
     @MessageBody() dto: SendMessageDto,
@@ -106,24 +127,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    console.log(
-      `[WS] User ${user.id} sending message to chat ${dto.chatId}:`,
-      dto,
-    );
-
     try {
+      console.log(`[WS] User ${user.id} sending message to chat ${dto.chatId}`);
+
       const message = await this.chatService.sendMessage(user, dto);
 
-      // Emit to all other participants
-      client.to(dto.chatId).emit('newMessage', message);
-
-      // Emit back to sender
-      client.emit('newMessage', message);
+      // Emit to everyone in the room (including sender)
+      this.server.to(dto.chatId).emit('newMessage', message);
 
       console.log(`[WS] Message emitted in room ${dto.chatId}`);
       return message;
-    } catch (error) {
-      console.error(`[WS] Error sending message for user ${user.id}:`, error);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(err as string);
+      console.error(
+        `[WS] Error sending message for user ${user.id}:`,
+        error.message,
+      );
       client.emit('error', { message: 'Message sending failed' });
     }
   }
@@ -146,5 +165,65 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userId: user.id,
       userName: user.first_name,
     });
+  }
+
+  /** Handle adding new participants to a group via socket */
+  @SubscribeMessage('addParticipants')
+  async handleAddParticipants(
+    @MessageBody()
+    dto: { roomId: string; userIds: string[] },
+    @ConnectedSocket() client: AuthenticatedSocket,
+  ) {
+    const user = client.data.user;
+    if (!user) {
+      console.warn(
+        `[WS] Unauthorized addParticipants attempt from ${client.id}`,
+      );
+      client.emit('error', { message: 'Unauthorized' });
+      return;
+    }
+
+    const { roomId, userIds } = dto;
+    if (!roomId || !userIds?.length) {
+      client.emit('error', { message: 'Invalid addParticipants payload' });
+      return;
+    }
+
+    try {
+      console.log(`[WS] User ${user.id} adding participants to room ${roomId}`);
+
+      // Update participants in DB
+      const updatedRoom = await this.chatService.addParticipants(roomId, {
+        userIds,
+      });
+
+      // Join new participants to the socket room if they are online
+      for (const participant of updatedRoom.participants) {
+        if (userIds.includes(participant.userId)) {
+          const sockets = await this.getSocketsByUserId(participant.userId);
+
+          for (const s of sockets) {
+            await s.join(roomId);
+          }
+        }
+      }
+
+      // Notify everyone in the room about new participants
+      this.server.to(roomId).emit('participantsAdded', {
+        roomId,
+        addedUserIds: userIds,
+        addedBy: user.id,
+        participants: updatedRoom.participants.map((p) => ({
+          id: p.user.id,
+          name: `${p.user.first_name} ${p.user.last_name ?? ''}`.trim(),
+        })),
+      });
+
+      console.log(`[WS] Participants added to room ${roomId}:`, userIds);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(err as string);
+      console.error(`[WS] Error adding participants:`, error.message);
+      client.emit('error', { message: 'Failed to add participants' });
+    }
   }
 }
