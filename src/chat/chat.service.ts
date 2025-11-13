@@ -68,11 +68,14 @@ export class ChatService {
         new Set(dto.participants.filter((id) => id !== currentUser.id)),
       );
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password, ...userDetail } = currentUser;
+
       //  Create all participant entries (admin + others)
       const participants: ChatParticipant[] = await Promise.all([
         this.participantRepo.create({
           chat,
-          user: currentUser,
+          user: userDetail,
           userId: currentUser.id,
           isAdmin: true,
         }),
@@ -115,10 +118,13 @@ export class ChatService {
       });
       await repo.save(chat);
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password, ...userDetail } = currentUser;
+
       const participants = await Promise.all([
         this.participantRepo.create({
           chat,
-          user: currentUser,
+          user: userDetail,
           userId: currentUser.id,
         }),
         this.participantRepo.create({
