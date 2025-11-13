@@ -18,7 +18,7 @@ import { DefineEntities } from '../models/entities/entities';
         schema: configService.get<string>('DB_SCHEMA'),
         entities: DefineEntities,
         synchronize: !!configService.get<string>('DB_SYNC'),
-        logging: !!configService.get<string>('DB_LOG'),
+        logging: false,
       }),
     }),
   ],

@@ -3,7 +3,6 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { ChatRepository } from 'src/models-repository/chat.model.repository';
 import { ChatParticipantRepository } from 'src/models-repository/chat-participant.model.repository';
@@ -14,9 +13,7 @@ import { ChatParticipant } from 'src/models/chat-participant.entity';
 import { Message } from 'src/models/message.entity';
 import { CreateChatDto } from 'src/dto/create-chat.dto';
 import { SendMessageDto } from 'src/dto/send-message.dto';
-import { JwtService } from '@nestjs/jwt';
 import { UsersRepository } from 'src/models-repository/user.model.repository';
-import { JwtPayload } from 'jsonwebtoken';
 import { UserStatus } from 'src/@types/enums/status.enum';
 import { AddParticipantsDto } from 'src/dto/add-participants.dto';
 import { In } from 'typeorm';
@@ -24,7 +21,6 @@ import { In } from 'typeorm';
 @Injectable()
 export class ChatService {
   constructor(
-    private readonly jwtService: JwtService,
     private readonly chatRepo: ChatRepository,
     private readonly participantRepo: ChatParticipantRepository,
     private readonly userRepo: UsersRepository,
@@ -225,19 +221,6 @@ export class ChatService {
     await this.chatRepo.update(chat.id, { lastMessage: message });
 
     return message;
-  }
-
-  async verifyJwt(token: string): Promise<User> {
-    try {
-      // Type the payload explicitly
-      const payload = this.jwtService.verify<JwtPayload>(token);
-
-      const user = await this.userRepo.findOneById(payload.sub);
-      if (!user) throw new UnauthorizedException('User not found');
-      return user;
-    } catch {
-      throw new UnauthorizedException('Invalid token');
-    }
   }
 
   async getUserRoomIds(userId: string): Promise<string[]> {
