@@ -7,6 +7,7 @@ import {
   Body,
   UseGuards,
   Query,
+  NotFoundException,
 } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { CurrentUser } from 'src/@types/decorators/current-user.decorator';
@@ -18,6 +19,7 @@ import { PaginateMessagesDto } from 'src/dto/paginate-messages.dto';
 import { AddParticipantsDto } from 'src/dto/add-participants.dto';
 import { plainToInstance } from 'class-transformer';
 import { ChatResponseDto } from 'src/dto/chat-response.dto';
+import { isUUID } from 'class-validator';
 
 @Controller('rooms')
 @UseGuards(AuthGuard)
@@ -56,6 +58,10 @@ export class ChatController {
   /** Get single chat details */
   @Get(':id')
   async getRoom(@CurrentUser() currentUser: User, @Param('id') chatId: string) {
+    if (!isUUID(chatId)) {
+      throw new NotFoundException('Chat not found');
+    }
+
     return this.chatService.getSingleChat(chatId, currentUser);
   }
 
@@ -66,6 +72,10 @@ export class ChatController {
     @Param('id') chatId: string,
     @Query() query?: PaginateMessagesDto,
   ) {
+    if (!isUUID(chatId)) {
+      throw new NotFoundException('Chat not found');
+    }
+
     const limit = query?.limit ? Number(query.limit) : undefined;
     const offset = query?.offset ? Number(query.offset) : undefined;
 
@@ -89,6 +99,10 @@ export class ChatController {
     @Param('id') chatId: string,
     @Body() dto: SendMessageDto,
   ) {
+    if (!isUUID(chatId)) {
+      throw new NotFoundException('Chat not found');
+    }
+
     return this.chatService.sendMessage(currentUser, { ...dto, chatId });
   }
 

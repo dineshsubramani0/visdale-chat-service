@@ -156,6 +156,8 @@ export class ChatService {
 
   /** Get a single chat with participants and messages */
   async getSingleChat(chatId: string, currentUser: User): Promise<Chat> {
+    console.log(chatId, '>>>>>>>>>>>');
+
     const chat = await this.chatRepo['repository'].findOne({
       where: { id: chatId },
       relations: [
@@ -166,6 +168,8 @@ export class ChatService {
         'messages.replyTo',
       ],
     });
+
+    console.log(chat, '>>>>>>>>>>>');
 
     if (!chat) throw new NotFoundException('Chat not found');
 
